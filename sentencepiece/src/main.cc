@@ -4,12 +4,16 @@
 #include "sentencepiece_processor.h"
 #include "jlcxx.hpp"
 
-sentencepiece::SentencePieceProcessor* sp = new sentencepiece::SentencePieceProcessor();
+sentencepiece::SentencePieceProcessor* sp;
+// TODO: check this flag and panic. Maybe we can just check if sp is null, but I
+// don't know if that's safe.
 bool ready = false;
 
-// extern "C" {
-
+// TODO: make sure we can unload and reinit without killing the wrapping
+// program.
+// TODO: look into SetVocabulary and SetEncodeExtraOptions
 void init(std::string model) {
+  sp = new sentencepiece::SentencePieceProcessor();
   sp->LoadOrDie(model);
   ready = true;
 }
@@ -33,6 +37,8 @@ std::vector<std::string> encodeStrings(std::string text) {
   return tokens;
 }
 
+// REVIEW: CxxWrap isn't liking overloaded functions. That's probably just my
+// lack of knowledge. Can be fixed, but this is good enough for now.
 std::string decodeIds(std::vector<int> ids) {
   std::string text;
   sp->Decode(ids, &text);

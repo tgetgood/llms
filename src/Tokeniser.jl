@@ -2,7 +2,7 @@ module Tokeniser
 
 module SentencePieceWrapper
 using CxxWrap
-const splib = "../spshim/shared/spshim.so"
+const splib = "../sentencepiece/shared/spshim.so"
 
 @wrapmodule(splib)
 
@@ -39,5 +39,7 @@ function decode(tokens::Vector{String})::String
             map(CxxWrap.StdLib.StdString, tokens)
         )
     )
+    #FIXME: This should work just as well:
+    # join(tokens)
 end
 end
