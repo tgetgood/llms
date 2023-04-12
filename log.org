@@ -1,0 +1,194 @@
+#+TITLE: Log
+
+This is a research project, so let's take notes. This file is just a
+chronological dump of problems I face and ideas I have.
+
+* Notes
+** [2023-04-05 Wed 13:22] Tokenising
+   - Note taken on [2023-04-12 Wed 12:23] \\
+     CxxWrap has built in functions for converting to libstd types, strings and
+     vectors specifically. So I've changed the C++ code to use vectors and all of the
+     conversions happen on the Julia side. I only need to convert explicitely when
+     decoding, but I'm going to assume there's a conversion happening on encoding as
+     well.
+   Julia has a package WordTokenizers.jl which has a tokeniser whose docs say
+   "basically the Sentencepiece processor's re-implementation in julia." Not the
+   most promising lead, but better than calling out via FFI if it works.
+
+   Let's construct a test to see if it works.
+
+   Quick failure. The model I have is in a binary format which I don't know how
+   to parse. WordTokenizers' implementation requires a julia dict which I can't
+   make for it with tools I have.
+
+   Next idea: let's just call sentencepiece via FFI.
+
+   Source: https://github.com/google/sentencepiece
+
+   =llama/llama/tokenizer.py= ought to include all of the config params we need.
+
+   [[https://github.com/google/sentencepiece/blob/master/src/sentencepiece_processor.h][Example usage]]:
+
+ #+BEGIN_SRC c
+   Usage:
+     SentencePieceProcessor sp;
+     sp.Load("//path/to/model");
+
+     vector<string> sps;
+     sp.Encode("hello world.", &sps).IgnoreError();
+
+     vector<int> ids;
+     sp.Encode("hello world.", &ids).IgnoreError();
+
+     string detok;
+     sp.Decode(sps, &detok);
+     CHECK_EQ("hello world.", detok).IgnoreError();
+
+     sp.Decode(ids, &detok);
+     CHECK_EQ("hello world.", detok).IgnoreError();
+
+     // We can also use SentencePieceText which manages the byte-offsets
+     // between user input (output) and internal sentence pieces.
+
+     SentencePieceText spt;
+     sp.Encode("hello world.", &spt);
+     // Emits the byte range of each piece.
+     for (const auto &piece : spt.pieces()) {
+        LOG(INFO) << piece.begin() << " " << piece.end();
+     }
+
+     sp.Decode({0, 1, 2, 3..}, &spt);
+     for (const auto &piece : spt.pieces()) {
+        LOG(INFO) << piece.begin() << " " << piece.end();
+     }
+   #+END_SRC
+
+   That looks pretty easy to deal with.
+
+   CxxWrap.jl turns out to be indispensible here. I kept getting segfaults
+   trying to write some wrapper functions marked =extern "C"...= and calling
+   them with =ccall=. The same code "just worked" with CxxWrap, so I didn't go
+   deep into debugging the first attempt.
+
+   There is a little bit of nuissance around type conversions in
+   CxxWrap. A C++ fn which returns a std::vector is wrapped so that that return
+   value is auto cast into a julia Vector. But passing Julia vectors in does not
+   autocast (I presume because it has to reallocate because julia values are
+   values and C++ code could break that invariant, but I don't know. Making the
+   paramters =const vector<int>= on the c++ side didn't help, but that was a
+   long shot).
+
+   But, CxxWrap does autocast Vector{Int32} into a C int*. It probably
+   reallocates under the hood for the same reasons mentioned above.
+
+   I'm currently using std::vector::assign to convert that array into a vector
+   for sentencepiece, so we're probably allocating 3 times and copying twice,
+   which will not fly if this needs to run in a hot spot.
+
+   But profiling is a task for another day. For now, it works.
+** [2023-04-11 Tue 09:22] Loading Local Modules
+   Here's a gap in my understanding of Julia, or maybe just a mismatch between
+   the way I approach writing programs and the assumptions of the language
+   tooling:
+
+   I tend to break large codebases up into many small files and group those
+   heirarchically (modules, namespaces, whatever language X calls it).
+
+   But I find myself fighting with =include= in Julia a lot. C style =include=
+   should have died with C, in my opinion. There are just too many things that
+   can go wrong when you copy-paste one file into another. Not to mention the
+   perennial "where was *that* defined?" problem.
+
+   So local modules it is. But the documentation is very sparse on how to work
+   with local modules. The [[https://docs.julialang.org/en/v1/manual/modules/][modules]] documentation, unless I can't read, doesn't
+   say anywhere how to get make sure the *code* of a module is loaded. You can't
+   =import .MyModule= without an =include "./MyModule.jl"= it seems. The
+   [[https://docs.julialang.org/en/v1/manual/code-loading/][Code Loading]] docs mention =LOAD_PATH= in passing in the preamble, but the
+   forums and SO answers I've found all insist that one should use =Pkg= for all
+   dependencies.
+
+   The problem there is that I have modules with <30 lines of code, that have to
+   be modules since they wrap shared libraries via FFI, and which cannot be
+   =include=d because loading them is not idempotent. So far I've come up with 2
+   solutions:
+
+   #+BEGIN_SRC julia
+     try
+         Tokeniser
+         @info "Tokeniser is already loaded, skipping"
+     catch e
+         if isa(e, UndefVarError)
+             @info "Loading Tokeniser."
+             include("./tokeniser.jl")
+             import Main.Tokeniser as Tokeniser
+         end
+     end
+   #+END_SRC
+
+   which works but feels a bit clunky. I could write it as a macro easily
+   enough, but it would still be a hack, plus I don't know how the module
+   compiler cache would deal with this.
+
+   The other is to add ="./"= to =LOAD_PATH=. This seems like the natural thing
+   to do, especially given all of the talk about "package directories" in the
+   code loading docs. But in those docs, there's no indication of how to point
+   the resolver at a given "package directory"; no setting in =Project.toml=, no
+   commands to =Pkg=, just some unspoken magic.
+
+   My concern is that why is there no configuration for a package that says "in
+   this package, sub packages are located at..."?
+
+   The "right" way to do this seems to be to create a new git repo with a full
+   blown package and use =Pkg.dev=. That's fine for large modules, but massive
+   overkill when just playing around.
+
+   I'm only writing this down so that I know why I've done what I have when a
+   year from now I come back and say "What the hell was I thinking doing
+   *that*?"
+** [2023-04-11 Tue 10:45] Loading the Models
+   I can't find any documentation on loading pytorch's .pth files without using
+   pytorch. Even if I could, the binary can only be understood in the context of
+   an out of band model (class) definition, so I don't think that's a great way
+   to start.
+
+   ggerganov has a tensor lib called [[https://github.com/ggerganov/ggml][ggml]] and a handy [[https://github.com/ggerganov/llama.cpp/blob/2663d2c6784ad7b77998c6874df25648d597f74b/convert-pth-to-ggml.py][script]] to convert pytorch
+   binaries to his format, and his format is "documented" — which is to say the
+   code is concise enough I can hope to read and understand it — so I can write
+   a parser.
+
+   N.B.: parsing binary is an infinitely finicky and brittle operation so I make
+   no promises. The script I'm writing will probably work if you generated the
+   ggml .bin files via the above script as of commit
+   =f4f5362edb01b05c383b23f36d7b3489c77061b5=.
+
+   I'll wrap it up in a script to make life easier.
+
+   I'll immediately reexport to models into yet another format (but this time
+   it's different!) so that I have something to work with.
+
+   The field is still young and in flux, but wouldn't it be nice if we had
+   standards for stuff like this? Think JSON for ml models. It's all just
+   structs and arrays under the hood, whatever we call them and however much OO
+   gobledygook we layer up on top.
+
+   How much space do we save with these custom formats over, say json + deflate?
+   What if we add in some primitive tags (#array{f16}, #end, I'm just making
+   this up as I go along)? Think Armstrong's "Getting Erlang to Talk to the
+   Outside World". Basically encode all machine words in LEB128, keep the 96
+   ascii chars, and that leaves 31 tags for a state machine.
+
+   #array #float "16"      <LEB128 encoded stream>
+    ^ tag  ^ tag  ^ ascii    ^ Must be an even number of bytes in the end.
+
+   As for tags, we need #array, #string, #bool, #float, #int, #uint, and the
+   machinery to define structs (#struct NAME #struct-field FNAME #struct-val
+   TYPE_TAG #end-struct) is a naive but sufficient set. NAME and FNAME are
+   ascii strings (`"` delimited) and struct values types are just the type
+   tags. The parser will have to be a state machine that expects a number after
+   numeric tags #int <LEB encoded or ascii encoded "32"?>
+
+   Lots of details to work out, but this isn't a new idea and it's worked
+   before. The real issue is getting enough momentum that we don't end up
+   creating just another pseudo standard.
+
+   That's enough of that, back to work.
