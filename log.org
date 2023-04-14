@@ -192,3 +192,12 @@ chronological dump of problems I face and ideas I have.
    creating just another pseudo standard.
 
    That's enough of that, back to work.
+** [2023-04-13 Thu 08:59] Performance
+   In the LLaMA paper, they claim to be able to process 380 tokens per second
+   per 80GB A100 gpu for the 65B param model. If I can get within 1/100 of that
+   with my setup it would be usable, if barely.
+
+   Given that one cycle of loading the model on my hardware will take ~30s, this
+   might just be a lost cause. But it will be fun to try and break it down so
+   that it can run at all with less than half as much ram as needed to load the
+   model and only 8GB vram
