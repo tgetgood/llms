@@ -201,3 +201,57 @@ chronological dump of problems I face and ideas I have.
    might just be a lost cause. But it will be fun to try and break it down so
    that it can run at all with less than half as much ram as needed to load the
    model and only 8GB vram
+** [2023-04-16 Sun 12:12] swiGLU activation
+   The llama paper states they use swiGLU activation in the feed forward layers,
+   but there's no mention of the β parameter and it doesn't appear in the
+   weights. The llama.cpp implementation uses silu (β = 1).
+
+   The llama code uses =torch.nn.functional.silu= as well, so that seems to be
+   the answer.
+** [2023-04-16 Sun 13:11] Running the model
+   Now that everything is loaded, let's see how far I can reason through the
+   execution of it before I have to dig through the code.
+
+   Normalisation:
+
+   This seems simple enough. Zhang & Sennrich 2019: let ||.|| be the l² norm,
+   then
+
+   rms(g, x) = g .* x .* √length(x) ./ ||x||
+
+   where g is the weight (gain) vector for the norm "layer" in the model dump.
+
+   Looking at the python llama code, this looks to be what's happening.
+
+   FFN layers:
+
+   layers.i.feed_forward.w[1,2,3].weight are NxM, MxN, & NxM respectively, where
+   N is the embedding size and M the hidden layer size.
+
+   Based on Shazeer (2020), given input vector x the layer output should be
+
+   (σ.(x * W) .* (x * V)) * W₂
+
+   I'm guessing, from the sizes, that w1 is W, w2 is W₂, and w3 is V
+
+   so we get
+
+   ffn(x) = (σ.(x*w1) .* (x*w3)) * w2
+
+   There don't seem to be any biases in the ggml model file. I'll need to check
+   if they were elided or not part of the original llama model at all.
+
+   Assuming the keyword param =bias=False= to the torch tensor constructors
+   means what I think it means, there aren't any bias vectors to worry about.
+
+   Attention:
+
+   I still don't properly understand attention. Looking through Vaswani et
+   al. 2017 I can't tell how the 4 matricies come in. For what they call "scaled
+   dot product attemtion" we should get something like:
+
+   softmax(wq*transpose(wk)./√d) * wv
+
+   But where does the input come in? The paper makes it sound as if Q *is* the
+   input (a batch of tokens encoded as a matrix), but it isn't clear enough to
+   put in code. I'll have to read the implementations to understand the paper.
