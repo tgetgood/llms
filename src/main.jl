@@ -13,8 +13,8 @@ end
 
 struct HyperParameters
     vocabsize::UInt32
-    embeddings::UInt32
-    swiglu_multiple::UInt32
+    embedding::UInt32
+    ffn_inner_mulitple::UInt32
     attentionheads::UInt32
     layers::UInt32
     rots::UInt32
@@ -94,18 +94,11 @@ function readstring(handle, bytes)
     return String(temp)
 end
 
-function readarray(handle, rank)
-    # FIXME: hardcoded Float16
-    layer = Array{Float16}(undef, rank...)
-    read!(handle, layer)
-    return layer
-end
-
 ##### Attempt at reading
 
-function n_ff((; swiglu_multiple, embeddings))::Int
-    return swiglu_multiple *
-        floor((2*(4*embeddings)/3 + swiglu_multiple - 1)/swiglu_multiple)
+function ffn_inner_units((; ffn_inner_mulitple, embedding))::Int
+    return ffn_inner_mulitple *
+        floor((2*(4*embedding)/3 + ffn_inner_mulitple - 1)/ffn_inner_mulitple)
 end
 
 function readfilemetadata(model)
@@ -148,20 +141,40 @@ end
 
 # Memory required to load the model (not counting collection overhead) in bytes
 function modelsize(hparams, contextwidth)
-    (; vocabsize, embeddings, layers) = hparams
+    (; vocabsize, embedding, layers) = hparams
     f16size = sizeof(Float16)
     f32size = sizeof(Float32)
 
 
     # TODO: A lisp style "align the comments column" formatter would be handy.
-    return embeddings * vocabsize * f16size + # Token embeddings
-        embeddings * f32size + # Norm
-        embeddings * vocabsize * f16size + # output buffer
-        layers * embeddings * f32size  + # attention norm
-        layers * embeddings^2 * f16size * 4 + # wq, wk, wv, wo
-        layers * embeddings * f32size + # ffn norm # TODO: ffn?
-        layers * n_ff(hparams) * embeddings * f16size * 3 + # w1, w2, w3
-        contextwidth * layers * embeddings * f32size * 2 # memory k & v
+    return embedding * vocabsize * f16size + # Token embedding
+        embedding * f32size + # Norm
+        embedding * vocabsize * f16size + # output buffer
+        layers * embedding * f32size  + # attention norm
+        layers * embedding^2 * f16size * 4 + # wq, wk, wv, wo
+        layers * embedding * f32size + # ffn norm # TODO: ffn?
+        layers * ffn_inner_units(hparams) * embedding * f16size * 3 + # w1, w2, w3
+        contextwidth * layers * embedding * f32size * 2 # memory k & v
+end
+
+# FIXME: const
+f32layers = Set([
+    "norm.weight"
+    "layers.0.attention_norm.weight"
+])
+
+# FIXME: const
+columnlayers = Set([
+ "tok_embeddings.weight"
+])
+
+function eltypelookup(name)
+    if endswith(name, "norm.weight")
+        return Float32
+    else
+        #FIXME: hardcoded default element type
+        return Float16
+    end
 end
 
 function readlayer(model)
@@ -170,9 +183,15 @@ function readlayer(model)
     rank = Vector{UInt32}(undef, lm.dimensions)
     read!(model, rank)
 
-    name = readstring(model, lm.namelength)
+    if lm.namelength > 100
+        throw("name is too long, this indicates a parsing error.")
+    end
 
-    data = readarray(model, rank)
+    name = readstring(model, lm.namelength)
+    eltype = eltypelookup(name)
+
+    data = Array{eltype}(undef, rank...)
+    read!(model, data)
 
     return Layer(name, data)
 end
@@ -183,9 +202,14 @@ function readlayermeta(model)
     rank = Vector{UInt32}(undef, lm.dimensions)
     read!(model, rank)
 
-    name = readstring(model, lm.namelength)
+    if lm.namelength > 100
+        throw("name is too long, this indicates a parsing error.")
+    end
 
-    datasize = reduce(*, rank, init=sizeof(Float16))
+    name = readstring(model, lm.namelength)
+    eltype = eltypelookup(name)
+
+    datasize = reduce(*, rank, init=sizeof(eltype))
 
     skip(model, datasize)
 
@@ -210,11 +234,9 @@ function readmodel(files)
 
     layers = []
     while !eof(model)
-        l = readlayermeta(model)
-        println(l)
-       push!(layers, l)
+        push!(layers, readlayer(model))
     end
-    return layers
+    return (hparams, layers)
 end
 
 ##### Scratch code.
