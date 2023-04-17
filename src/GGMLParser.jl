@@ -33,11 +33,6 @@ struct LayerMeta
     ftype::UInt32 # 1 => Float16 values (mostly)
 end
 
-struct Layer{T}
-    name::String
-    data::T
-end
-
 ##### Wrapper to read a split file set as if it were one file
 
 mutable struct FilesReader
@@ -190,7 +185,7 @@ function readlayer(model)
     data = Array{eltype}(undef, rank...)
     read!(model, data)
 
-    return Layer(name, data)
+    return (name, data)
 end
 
 function readlayermeta(model)
