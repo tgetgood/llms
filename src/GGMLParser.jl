@@ -62,8 +62,6 @@ function readfilemetadata(model)
 
     @assert hparams.f16 == 1 "Currently only supporting Float16."
 
-    println("next file:", version, hparams)
-
     return (version, hparams)
 end
 
@@ -138,15 +136,12 @@ function readlayer(model)
     rank = Vector{UInt32}(undef, lm.dimensions)
     read!(model, rank)
 
-    print("reading layer", lm, rank)
     if lm.namelength > 100
         throw("name is too long, this indicates a parsing error.")
     end
 
     name = readstring(model, lm.namelength)
     eltype = eltypelookup(name)
-
-    println(" ", name)
 
     data = Array{eltype}(undef, rank...)
     read!(model, data)
@@ -197,13 +192,22 @@ function readfile(file)
     return (hparams, layers)
 end
 
+function mergelayer(a, b)
+end
+
+function mergeshards(layers)
+    if length(layers) == 1
+        return layers[1]
+    else
+        return reduce(mergelayer, layers[2:end], init=layers[1])
+    end
+end
+
 """
 Reads the model stored in the list of `files` passed and returns a tuple
 containing hyperparameters and a list of (name, tensor) pairs.
 
-N.B. The files do not have to be in order, but the order of the tensors returned
-will reflect the order in which the input files were passed.
-REVIEW: Is that true?
+N.B. If the files are not in order, the matricies will be incorrect.
 """
 function readmodel(files)
     layers = []
@@ -225,7 +229,7 @@ function readmodel(files)
 
     # TODO: layers are split across files, which is a bizzare way of dealing
     # with it, but so be it.
-    return (hparams, layers)
+    return (hparams, mergeshards(layers))
 end
 
 end
