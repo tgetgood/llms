@@ -2,7 +2,9 @@ if !("./" in LOAD_PATH)
     push!(LOAD_PATH, "./")
 end
 
-# import Tokeniser
+import Flux
+import Flux.NNlib as NNlib
+import Tokeniser
 import ModelLoader
 
 files = [
@@ -10,15 +12,45 @@ files = [
     # "../models/13B/ggml-model-f16.bin.1"
 ]
 
+"""
+Applies the root mean square norm from Zhang, Sennrich (2019) along dim.
+"""
+function RMSNorm(input, gain, dim=1)
+    sqn = size(input)[dim]^(1/2)
 
-
-##### rough sketch of execution
-function runlayer(x, layer)
-    x = x + attention(attnorm(x))
-    x = x + ffn(ffnnorm(x))
-    return x
+    return gain .* input .* sqn ./ sum(x -> x^2, input, dims=dim).^(1/2)
 end
 
-function run(x, layers)
-    return unembed(reduce(runlayer, layers, init=embed(x)))
+
+
+function attention(input, (; norm, Q, K, V, O), rotv)
+    normalised = RMSNorm(input, norm)
+
+
+
+end
+
+function ffn(input, (; norm, W, W2, V))
+    normalised = RMSNorm(input, norm)
+
+    return (NNlib.sigmoid.(normalised * W) .* (normalised * V)) * W2
+end
+
+##### rough sketch of execution
+function runlayer(input, layer)
+    input = input .+ attention(input, layer.attention)
+    input = input .+ ffn(input, layer.ffn)
+    return input
+end
+
+function run(input, model)
+    # REVIEW: We want to load the layers to the gpu as we go. How do we overlap
+    # the loading of future layers with the execution of the current ones to
+    # minimise latency?
+    #
+    # The whole thing *will not* fit in vram at once, but ~10 layers will no
+    # problem.
+    normalised = RMSNorm(input, norm)
+    embedding = embed(normalised, model.token_embeddings)
+    return unembed(reduce(runlayer, model.layers, init=embedding), model.output)
 end
