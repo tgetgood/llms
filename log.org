@@ -255,3 +255,71 @@ chronological dump of problems I face and ideas I have.
    But where does the input come in? The paper makes it sound as if Q *is* the
    input (a batch of tokens encoded as a matrix), but it isn't clear enough to
    put in code. I'll have to read the implementations to understand the paper.
+
+   Attention has always had the feel of magic sauce. Everyone writes just enough
+   to brag to their peers, but never quite enough for an outsider to understand
+   what's going on. Well, now I have code to read...
+** [2023-04-17 Mon 17:53] Loading sharded models
+   - Note taken on [2023-04-18 Tue 20:25] \\
+     Additional observation: I'm getting errors when trying to save the entire model
+     to bson and it appears that the BSON spec requires the number of bytes in the
+     file to fit in an Int32. So saving 13GB files seems to be out of the question.
+   - Note taken on [2023-04-18 Tue 20:09] \\
+     Fun fact there: Flux.jl's recommended model saving method is the BSON.jl
+     library, which sounds great, but it's way slower than reading/writing binary
+     directly. I'm not sure why that is and it's very likely that I'm doing something
+     wrong, but the docs make it out to be a one line solution to everything.
+   I was avoiding thinking about this, but that was a mistake. The ggml format
+   breaks up each tensor across each file rather than splitting the files by
+   layers. I don't understand why this approach was chosen, though I'm sure they
+   have their reasons.
+
+   For my purposes though, it just adds another layer of nuissance. Now, in
+   order to load a model that doesn't fit into ram, I have to iterate over each
+   file for each tensor. That's not really a big deal, but it feels like an ugly
+   way to do things. Not to mention the fact that the stitching back together of
+   the pieces is done via implicit understanding which is brittle.
+
+   This just means that I need to reserialise the models in my own format as
+   soon as I know what that is so that I don't have to worry about 3rd party
+   formats any longer.
+** [2023-04-18 Tue 10:37] RoPE
+   I ought to have read Su et al. 2022 before complaining that the attention
+   mechanism is obscure, but it wouldn't have made a difference. After going
+   through the paper, I'm still not much clearer on what attention heads do, nor
+   which of the several formulae for attention are being used. There are a lot
+   of underdefined variables (sim, ϕ, ψ) and I'm not sure what the relation is
+   between the formulae for attention and the simple linear algebra equation:
+
+   (Rᵈ_θ,m W_qxₘx)ᵀ(Rᵈ_θ,n Wₖxₙ)
+
+   The math is straight forward enough, if quite tedious, but I'll need to go
+   through the code with a comb to figure all of this out.
+
+   The outer product form kind of looks like the code in =precompute_freqs_cis=,
+   but there's something else going on.
+
+   Name mapping: dim = embeddings, n_heads = attentionheads, and I think
+   max_seq_len is contextwidth, but I'm not 100%.
+
+   After reading through the papers again and staring at the code for god knows
+   how long I think I understand what's going on here.
+
+   let q = RxQ, k = RxK, and v = xV
+
+   attn = softmax(qkᵀ./√d)·O
+
+   Where R is the block diagonal cis(nθ) matrix from Su et al. and the softmax
+   is performed separately across each input and each head.
+
+   The llama code does the rotation operation differently. It comes from the
+   observation that
+
+   (cosθ + isinθ)·(x₁ + x₂i) = x₁cosθ - x₂sinθ + i(x₂cosθ + x₁sinθ)
+
+   which gives us the same result as the sum of the outer products with about
+   half as much work.
+
+   There's still the issue of the cache_k/v which I don't understand. That might
+   just be an artefact of torch not being able to move lexical bindings into the
+   gpu, but I'm not sure.
