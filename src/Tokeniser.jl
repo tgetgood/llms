@@ -2,7 +2,7 @@ module Tokeniser
 
 module SentencePieceWrapper
 using CxxWrap
-const splib = "../sentencepiece/shared/spshim.so"
+const splib = get(ENV, "SP_SHIM_PATH", "../sentencepiece") * "/shared/spshim.so"
 
 @wrapmodule(splib)
 
@@ -13,7 +13,7 @@ end
 
 using CxxWrap
 import .SentencePieceWrapper
-const modelpath = "../models/tokenizer.model"
+const modelpath = get(ENV, "TOKENISER_MODEL", "../models/tokenizer.model")
 
 function __init__()
     SentencePieceWrapper.init(modelpath)
@@ -39,7 +39,7 @@ function decode(tokens::Vector{String})::String
             map(CxxWrap.StdLib.StdString, tokens)
         )
     )
-    #FIXME: This should work just as well:
+    #FIXME: This should work just as well, but needs testing
     # join(tokens)
 end
 end
