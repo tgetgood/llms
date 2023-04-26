@@ -189,7 +189,7 @@ function readfile(file)
     while !eof(model)
         push!(layers, readlayer(model))
     end
-    return (hparams, layers)
+    return (hparams, (tokens, idsbytoken), layers)
 end
 
 function mergelayer(a, b)
@@ -207,29 +207,29 @@ end
 Reads the model stored in the list of `files` passed and returns a tuple
 containing hyperparameters and a list of (name, tensor) pairs.
 
-N.B. If the files are not in order, the matricies will be incorrect.
+Takes list of files, but currently does not properly recombine models split
+across multiple files.
 """
 function readmodel(files)
-    layers = []
-    hparams = undef
-    for file in files
-        (h, l) = readfile(file)
-        if hparams == undef
-            hparams = h
-        else
-            @assert(
-            h == hparams,
-                "file metadata mismatch! got " * string(h) *
-                " but expected " * stirng(hparams) *
-                ". Aborting."
-            )
-        end
-        push!(layers, l)
-    end
-
-    # TODO: layers are split across files, which is a bizzare way of dealing
+    file = files[1]
+    # layers are split across files, which is a bizzare way of dealing
     # with it, but so be it.
-    return (hparams, mergeshards(layers))
+
+    # for file in files
+    # read each, assert metadata is identical, then merge layers.
+
+    #(hparams, tokendict, layers) = readfile(file)
+
+    # but in the meantime:
+    return readfile(file)
+
+    ## TODO: Check file metadata matches when reading multiple.
+    # @assert(
+    #     h == hparams,
+    #     "file metadata mismatch! got " * string(h) *
+    #     " but expected " * stirng(hparams) *
+    #     ". Aborting."
+    # )
 end
 
 end

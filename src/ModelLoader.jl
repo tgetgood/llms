@@ -1,6 +1,8 @@
 module ModelLoader
 
 import GGMLParser
+import Tokeniser
+
 export ingestggml
 
 struct Attention{T}
@@ -23,24 +25,42 @@ struct Layer{T}
     ff::FeedForward{T}
 end
 
+struct TokenDict
+    tokens::Vector{GGMLParser.ScoredToken}
+    byid::Dict{String, UInt32}
+end
+
 struct Model{T}
+    hyperparameters::GGMLParser.HyperParameters
+    tokens::TokenDict
     token_embeddings::Array{T}
     norm::Vector{Float32}
     output::Array{T}
     layers::Vector{Layer{T}}
 end
 
+function normalisetokens(tokens)
+    return map(tokens) do (; token, score, id)
+        return GGMLParser.ScoredToken(
+            Tokeniser.normalise(token),
+            score,
+            id
+        )
+    end
+end
+
 function ingestggml(files)
-    l = GGMLParser.readmodel(files)
-    n = l[1].layers
+    (hparams, tokendict, rawlayers) = GGMLParser.readmodel(files)
+    n = hparams.layers
+    @assert 9 * n + 3 == length(rawlayers) "invalid model metadata"
     layers::Vector{Layer{Float16}} = []
     layer = 0
     i = 4
     d = Dict()
-    while i <= length(l[2])
-        m = match(Regex("\\."*string(layer)*"\\.(.*)"), l[2][i][1])
+    while i <= length(rawlayers)
+        m = match(Regex("\\."*string(layer)*"\\.(.*)"), rawlayers[i][1])
         if m != nothing
-            d[m[1]] = l[2][i][2]
+            d[m[1]] = rawlayers[i][2]
             i = i + 1
         else
             temp = Layer(
@@ -64,9 +84,11 @@ function ingestggml(files)
         end
     end
     return Model(
-        l[2][1][2],
-        l[2][2][2],
-        l[2][3][2],
+        hparams,
+        TokenDict(normalisetokens(tokendict[1]), tokendict[2]),
+        rawlayers[1][2],
+        rawlayers[2][2],
+        rawlayers[3][2],
         layers
     )
 end

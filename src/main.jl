@@ -4,6 +4,7 @@ end
 
 import Flux
 import Flux.NNlib as NNlib
+import OneHotArrays
 import Tokeniser
 import ModelLoader
 
@@ -20,8 +21,6 @@ function RMSNorm(input, gain, dim=1)
 
     return gain .* input .* sqn ./ sum(x -> x^2, input, dims=dim).^(1/2)
 end
-
-
 
 function attention(input, (; norm, Q, K, V, O), rotv)
     normalised = RMSNorm(input, norm)
@@ -50,7 +49,24 @@ function run(input, model)
     #
     # The whole thing *will not* fit in vram at once, but ~10 layers will no
     # problem.
-    normalised = RMSNorm(input, norm)
-    embedding = embed(normalised, model.token_embeddings)
-    return unembed(reduce(runlayer, model.layers, init=embedding), model.output)
+    embedding = embed(input, model.token_embeddings)
+    normalised = RMSNorm(embedding, norm)
+    return reduce(runlayer, model.layers, init=normalised) * model.output
+end
+
+function textinput(text::String, model)
+    tokens = Tokeniser.encode(text)
+
+    ids = map(x -> get(model.tokens.byid, x, 1), tokens)
+
+    return OneHotArrays.onehotbatch(ids, 1:model.hyperparameters.vocabsize)
+end
+
+"""
+Returns naive closest match instead of sampling from the token distribution.
+"""
+function simpletextoutput(vs, model)
+    ids = OneHotArrays.onecold(vs, 1:model.hyperparameters.vocabsize)
+    tokens = map(x -> model.tokens.tokens[x].token, ids)
+    return Tokeniser.decode(tokens)
 end
