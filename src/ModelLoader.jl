@@ -10,31 +10,31 @@ struct Attention{T}
     K::Array{T}
     V::Array{T}
     O::Array{T}
-    norm::Vector{Float32}
+    norm::Array{Float32}
 end
 
 struct FeedForward{T}
     W::Array{T}
     W2::Array{T}
     V::Array{T}
-    norm::Vector{Float32}
+    norm::Array{Float32}
 end
 
 struct Layer{T}
     attention::Attention{T}
-    ff::FeedForward{T}
+    ffn::FeedForward{T}
 end
 
 struct TokenDict
     tokens::Vector{GGMLParser.ScoredToken}
-    byid::Dict{String, UInt32}
+    idmap::Dict{String, UInt32}
 end
 
 struct Model{T}
     hyperparameters::GGMLParser.HyperParameters
     tokens::TokenDict
     token_embeddings::Array{T}
-    norm::Vector{Float32}
+    norm::Array{Float32}
     output::Array{T}
     layers::Vector{Layer{T}}
 end
@@ -63,19 +63,21 @@ function ingestggml(files)
             d[m[1]] = rawlayers[i][2]
             i = i + 1
         else
+            an = d["attention_norm.weight"]
+            fn = d["ffn_norm.weight"]
             temp = Layer(
                 Attention(
                     d["attention.wq.weight"],
                     d["attention.wk.weight"],
                     d["attention.wv.weight"],
                     d["attention.wo.weight"],
-                    d["attention_norm.weight"]
+                    reshape(an, (1, size(an)...))
                 ),
                 FeedForward(
                     d["feed_forward.w1.weight"],
                     d["feed_forward.w2.weight"],
                     d["feed_forward.w3.weight"],
-                    d["ffn_norm.weight"]
+                    reshape(fn, (1, size(fn)...))
                 )
             )
             push!(layers, temp)
@@ -83,11 +85,12 @@ function ingestggml(files)
             d = Dict()
         end
     end
+    norm = rawlayers[2][2]
     return Model(
         hparams,
         TokenDict(normalisetokens(tokendict[1]), tokendict[2]),
         rawlayers[1][2],
-        rawlayers[2][2],
+        reshape(norm, (1, size(norm)...)),
         rawlayers[3][2],
         layers
     )

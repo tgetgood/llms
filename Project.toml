@@ -1,7 +1,10 @@
 [deps]
 BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+Lazy = "50d2b5c4-7a5e-59d5-8109-a42b560f39c0"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OneHotArrays = "0b1bfda6-eb8a-41d2-88d8-f5af5cad476f"
