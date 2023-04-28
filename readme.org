@@ -1,0 +1,24 @@
+#+TITLE: Learning LLMs from Scratch
+
+I've been out of the ml space for over a decade, and aside from reading
+abstracts here and there have no idea how modern transformer based methods
+work.
+
+What better way to get up to speed than to implement one from scratch?
+
+This is an attempt to implement a runtime for the LLaMA/alpaca models in julia
+from core principles and the literature using the [[https://github.com/facebookresearch/llama][llama]] and [[https://github.com/ggerganov/llama.cpp][llama.cpp]] codebases
+as guidance when the papers are obscure.
+
+In the couple of weeks I've been pursuing this I've come to see a definite trend
+towards gnosticism over the past ten years. Without code it would take days or
+weeks of lit review to find the math invovled in each of a dozen
+functions. Obviously part of this is due to companies not wanting to give too
+much away about their exceedingly profitable contraptions, but even more, I
+think, it's just a rapidly moving field full of enthusiasts who can't be
+bothered with catering to those who can't keep up.
+
+With that in mind, one of the goals of this project is to get the math behind
+the code as clear as possible. If I get excited I'll try to push the boundaries
+of Julia's "latex that runs" style, but first I need to figure out what's going
+on.

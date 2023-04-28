@@ -307,7 +307,7 @@ chronological dump of problems I face and ideas I have.
 
    let q = RxQ, k = RxK, and v = xV
 
-   attn = softmax(qkᵀ./√d)·O
+   attn = softmax(qkᵀ./√d)V·O
 
    Where R is the block diagonal cis(nθ) matrix from Su et al. and the softmax
    is performed separately across each input and each head.
@@ -323,3 +323,32 @@ chronological dump of problems I face and ideas I have.
    There's still the issue of the cache_k/v which I don't understand. That might
    just be an artefact of torch not being able to move lexical bindings into the
    gpu, but I'm not sure.
+** [2023-04-28 Fri 11:12] Paying more attention
+   I have a lot of assumptions to validate. The biggest one is that the data
+   layout in ggml matches that expected by the llama python code. I'm putting
+   that off because it's a doozy and if it's not true it might just be easier to
+   write my own data exported from pth.
+
+   Other confusing aspects: A(x) means xAᵀ upon reading the fairscale code and
+   torch docs. Bloody OO. I'm starting to wonder if I'm interpreting any of the
+   square matricies in the correct orientation.
+
+   In the llama Attention class, xq, xk, & xv appear to be 3 tensors, despite
+   the fact that as far as I can tell they ought to be plain matricies. My best
+   guess at present is that the dimentions are batch, tokens, weights so that
+   the first =transpose(1,2)= gets "the tokens to the outside" so that we have
+   a #contextx#context matrix which conceptually weights each token by each
+   other.
+
+   why are V and O separate matricies? Ignoring the batch dimesion, the code
+   just runs wo(scores*values) == scores*values*woᵀ. So why not precompute V*Oᵀ
+   and not store both? Why spend the effort learning both?
+
+   One glaring bit of ignorance: How in tarnation does this model produce more
+   output tokens than there are tokens in the input? From what I've seen you can
+   give it "once upon a time" and it will just spew text until the chips melt,
+   but my current understanding does not accomodate that fact. Do you pad the
+   input with zeros and then let it fill in the rest? And then fill another
+   buffer half with the previous output and half with zeroes? The diagrams of
+   transformers I've seen have encoder/decoder parallel components. Somehow I've
+   lost that...
