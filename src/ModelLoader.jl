@@ -33,7 +33,7 @@ end
 struct Model{T}
     hyperparameters::GGMLParser.HyperParameters
     tokens::TokenDict
-    token_embeddings::Array{T}
+    token_embedding::Array{T}
     norm::Array{Float32}
     output::Array{T}
     layers::Vector{Layer{T}}
@@ -49,11 +49,11 @@ function normalisetokens(tokens)
     end
 end
 
-function ingestggml(files)
+function ingestggml(T, files)
     (hparams, tokendict, rawlayers) = GGMLParser.readmodel(files)
     n = hparams.layers
     @assert 9 * n + 3 == length(rawlayers) "invalid model metadata"
-    layers::Vector{Layer{Float16}} = []
+    layers::Vector{Layer{T}} = []
     layer = 0
     i = 4
     d = Dict()
@@ -65,15 +65,15 @@ function ingestggml(files)
         else
             an = d["attention_norm.weight"]
             fn = d["ffn_norm.weight"]
-            temp = Layer(
-                Attention(
+            temp = Layer{T}(
+                Attention{T}(
                     d["attention.wq.weight"],
                     d["attention.wk.weight"],
                     d["attention.wv.weight"],
                     d["attention.wo.weight"],
                     reshape(an, (1, size(an)...))
                 ),
-                FeedForward(
+                FeedForward{T}(
                     d["feed_forward.w1.weight"],
                     d["feed_forward.w2.weight"],
                     d["feed_forward.w3.weight"],
@@ -86,7 +86,7 @@ function ingestggml(files)
         end
     end
     norm = rawlayers[2][2]
-    return Model(
+    return Model{T}(
         hparams,
         TokenDict(normalisetokens(tokendict[1]), tokendict[2]),
         rawlayers[1][2],
@@ -95,5 +95,10 @@ function ingestggml(files)
         layers
     )
 end
+
+function ingestggml(files)
+    return ingestggml(Float16, files)
+end
+
 
 end
