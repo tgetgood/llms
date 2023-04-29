@@ -1,6 +1,4 @@
 #include <vector>
-#include <iostream>
-#include <iterator>
 #include "sentencepiece_processor.h"
 #include "jlcxx.hpp"
 
@@ -19,7 +17,8 @@ void init(std::string model) {
 }
 
 // REVIEW: The lifetime of the tokeniser is the full length of the program, but
-// we really should clean up. The problem is I don't know C++...
+// we really should clean up. But what happens when you're working interactively
+// and try to unload and reload?
 void close() {
   ready = false;
   delete(sp);
@@ -37,8 +36,6 @@ std::vector<std::string> encodeStrings(std::string text) {
   return tokens;
 }
 
-// REVIEW: CxxWrap isn't liking overloaded functions. That's probably just my
-// lack of knowledge. Can be fixed, but this is good enough for now.
 std::string decodeIds(std::vector<int> ids) {
   std::string text;
   sp->Decode(ids, &text);
@@ -51,7 +48,17 @@ std::string decodeStrings(std::vector<std::string> tokens) {
   return text;
 }
 
-// }
+int bos() {
+  return sp->bos_id();
+}
+
+int eos() {
+  return sp->eos_id();
+}
+
+int pad() {
+  return sp->pad_id();
+}
 
 JLCXX_MODULE define_julia_module(jlcxx::Module& mod) {
   mod.method("init", &init);
@@ -59,4 +66,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod) {
   mod.method("encodeStrings", &encodeStrings);
   mod.method("decodeIds", &decodeIds);
   mod.method("decodeStrings", &decodeStrings);
+  mod.method("bos", &bos);
+  mod.method("eos", &eos);
+  mod.method("pad", &pad);
 }

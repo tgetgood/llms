@@ -64,4 +64,8 @@ function decode(tokens::Vector{String})::String
     #FIXME: This should work just as well, but needs testing
     # join(tokens)
 end
+
+bos() = SentencePieceWrapper.bos()
+eos() = SentencePieceWrapper.eos()
+pad() = SentencePieceWrapper.pad()
 end
