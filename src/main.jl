@@ -9,13 +9,16 @@ import SparseArrays
 import LinearAlgebra
 import Tokeniser
 import ModelLoader
+import GGMLParser
 import Lazy
 
 # Dev imports
 import BenchmarkTools
 
 # TODO: Take this as input
-const contextwidth = 512
+# REVIEW: Do we actually need to set this? Why not just allow the model to spew
+# text until we get sick of it, or run out of memory?
+const maxcontext = 512
 
 
 files = [
@@ -76,12 +79,19 @@ end
 Returns the vector of rotations à la Su et al. 2022, in the complex format used
 in the llama codebase.
 """
-function ropevector(T::Type, d::Number, context::Number, θ::Number = 10000)
+function ropevector(
+    T::Type,
+    hp::GGMLParser.HyperParameters,
+    size::Number,
+    θ::Number = 10000
+)
+    d = hp.embedding/hp.attentionheads
     @assert d % 2 == 0
     θs = map(i -> θ^(-2*i/d), 0:2:d-1)
-    ns = 1:context
+    ns = 1:size
+    base = map(θ -> Complex{T}(cos(θ), sin(θ)), ns' .* θs)
 
-    return map(θ -> Complex{T}(cos(θ), sin(θ)), ns' .* θs)
+    return repeat(base, hp.attentionheads)
 end
 
 function ropevector(d, context, θ = 10000)
@@ -93,20 +103,18 @@ function attention(input, (; norm, Q, K, V, O), rotv, hparams)
     #x = decomplexify(complexify(i)*rotv)
 
     n = div(hparams.embedding, hparams.attentionheads)
-    r = repeat(rotv, hparams.attentionheads)
-    xq = decomplexify(complexify(x*Q)*r)
-    xk = decomplexify(complexify(x*K)*r)
+    xq = decomplexify(complexify(x*Q)*rotv)
+    xk = decomplexify(complexify(x*K)*rotv)
 
-    return Flux.NNlib.softmax(xq*xk'/sqrt(n))*(x*V)*O'
+    return input + Flux.NNlib.softmax(xq*xk'/sqrt(n))*(x*V)*O
 end
 
 function ffn(input, (; norm, W, W2, V))
     normalised = RMSNorm(input, norm)
 
-    return (NNlib.sigmoid.(normalised * W) .* (normalised * V)) * W2
+    return input + (NNlib.sigmoid.(normalised * W) .* (normalised * V)) * W2
 end
 
-##### rough sketch of execution
 function runlayer(rotv, hparams)
     return function(input, layer)
         # TODO: move these to the gpu and figure out a way to load the next layer
@@ -114,50 +122,67 @@ function runlayer(rotv, hparams)
         input = input |> Flux.cpu
         layer = layer |> Flux.cpu
 
-        input = input .+ attention(input, layer.attention, rotv, hparams)
-        input = input .+ ffn(input, layer.ffn)
+        input = input + attention(input, layer.attention, rotv, hparams)
+        input = input + ffn(input, layer.ffn)
         return input
     end
 end
 
-function run(input, model)
+function run(embedding, model)
+    l = size(embedding)[1]
     hp = model.hyperparameters
-    embedding = pad(embedtext(input, model), contextwidth)
-    normalised = RMSNorm(embedding, model.norm)
-    rotv = ropevector(
-        eltype(embedding),
-        div(hp.embedding, hp.attentionheads),
-        contextwidth
-    )
+    rotv = ropevector(eltype(embedding), hp, l)
     result = reduce(
         runlayer(rotv, model.hyperparameters),
         model.layers,
-        init=normalised
+        init=embedding
     )
-    return result * model.output
+    return RMSNorm(result, model.norm) * model.output
+
 end
 
-function pad(input::AbstractArray{T}, n::Int) where {T}
-    padding = zeros(T, (n-size(input)[1], size(input)[2:end]...))
-    return vcat(input, padding)
+function padding(input::AbstractArray{T}) where {T}
+    return zeros(T, (1, size(input)[2:end]...))
 end
 
-function embedtext(text::String, model)
-    return transpose(
-    Lazy.@>> Tokeniser.encode(text) begin
-        map(x -> get(model.tokens.idmap, x, 1))
-        map(x -> model.token_embedding[:, x])
-        reduce(hcat)
+function pad(input::AbstractArray{T}) where {T}
+    return vcat(input, padding(input))
+end
+
+function embedtoken(token, model)
+    return model.token_embedding[:, token]
+end
+
+function embedtokens(tokens::Vector, model)
+    Lazy.@as ts tokens begin
+        map(x -> embedtoken(x, model)', ts)
+        reduce(vcat, ts)
     end
-    )
 end
 
-"""
-Returns naive closest match instead of sampling from the token distribution.
-"""
-function simpletextoutput(vs, model)
-    @info size(vs) model.hyperparameters.vocabsize
-    ids = OneHotArrays.onecold(vs', 1:model.hyperparameters.vocabsize)
-    tokens = map(x -> model.tokens.tokens[x].token, ids)
+function sampletoken(v)
+    # REVIEW: sample with temperature, or stick with frozen?
+    # probs = Flux.NNlib.softmax(v ./ 0.8)
+
+    return argmax(v)
+end
+
+function decoderloop(prompt, model)
+    tokens = Tokeniser.encodeids(prompt)
+
+    for i in 1:1
+        embedded = pad(embedtokens(tokens, model))
+        next = sampletoken(run(embedded, model)[end, :])
+
+        append!(tokens, next)
+    end
+
     return Tokeniser.decode(tokens)
 end
+
+# Prompts generated from llama.cpp with temp 0 for testing compatibility
+testprompts = Dict(
+    "once upon a time " => "once upon a time 2013-2014\nOnce Upon A Time Season 3 Episode 17 \"Heart Of Gold\"",
+    "and bob's your uncle!" => "and bob's your uncle!\nI'm not sure if I've ever mentioned this before, but I have a thing for the word ̈̈\"bob\".",
+    "6 tips for underperforming yeti trackers:" => "6 tips for underperforming yeti trackers:\n1. Don’t be afraid to ask questions. If you don’t know what something is, or how it works, just ask!"
+)

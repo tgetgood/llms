@@ -100,5 +100,4 @@ function ingestggml(files)
     return ingestggml(Float16, files)
 end
 
-
 end

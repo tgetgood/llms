@@ -31,8 +31,15 @@ function __init__()
     SentencePieceWrapper.init(modelpath)
 end
 
-function encodeids(text::String)::Vector{Int32}
+function encodeidsraw(text::String)::Vector{Int32}
     return SentencePieceWrapper.encodeIds(text)
+end
+
+function encodeids(text::String)::Vector{Int32}
+    return map(encodeidsraw(text)) do id
+        # Base 1 indexing
+        return id + 1
+    end
 end
 
 # FIXME: There's some conversion that works for vectors of
@@ -50,8 +57,9 @@ function encode(text::String)::Vector{String}
 end
 
 function decode(tokens::Vector{Int32})::String
+    nts::Vector{Int32} = map(x -> x - 1, tokens)
     return SentencePieceWrapper.decodeIds(
-        CxxWrap.StdLib.StdVector(tokens)
+        CxxWrap.StdLib.StdVector(nts)
     )
 end
 

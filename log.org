@@ -352,3 +352,69 @@ chronological dump of problems I face and ideas I have.
    buffer half with the previous output and half with zeroes? The diagrams of
    transformers I've seen have encoder/decoder parallel components. Somehow I've
    lost that...
+** [2023-04-29 Sat 08:59] Text Generation
+   To answer my last question, we generate text by running the model on the
+   prompt and getting one more token, add that to the prompt and run again to
+   get one more token, etc. ad nauseum.
+
+   That's a lot of compute per token... Everything is set up to run batches and
+   get one more token for each prompt of the batch in a single run. That's
+   presumably how APIs manage to serve large numbers of customers at all. But
+   they're still using a mind boggleing amount of computing power.
+
+   Anyway, I'm confident I can optimise the code to run the 7B model fast enough
+   for my liking. I'm getting one token every 5-6s on cpu without yet having
+   profiled anything. The bigger models we'll deal with later.
+
+   Yet some oddities remain: unless I'm misreading the code, the model clobbers
+   the tokens of the input prompt in place, and we just take the last clobbered
+   token and consider it the next output token. No, that's not correct. Python
+   slices are open on the left and closed on the right, so after the initial
+   prompt feed, we're passing the token just past the end of the working
+   context. I.e. we're passing a single padding embedding, which is a vector of
+   zeroes. The initial prompt is padded with a single zero vector and its the
+   final state of that vector which we consider the next token.
+
+   Furthermore, once we've started generating text, the model only runs on one
+   token at a time, clobbering that token to be the next output. That means that
+   the model keeps internal state between runs which I am not doing now. That
+   would be the cache_k/v that I've been wondering about, presumably.
+
+   I'd prefer — purely aesthetically for the moment — to make this a pure
+   operation. Let the run return both outputs and current internal state and
+   take in a state on each iteration. At the very least this will let us freeze
+   and thaw running generators, replay generation with different temperatures,
+   etc.. And of course, the less hidden state, the easier a system is to
+   understand, which is my main goal, after all.
+** [2023-04-29 Sat 09:10] Validating the loaded model
+   This should not be taken for granted. I'm certain that I'm misinterpreting
+   some of the matricies loaded from ggml. It doesn't help that all I have are a
+   bunch of square pegs and square holes.
+
+   The question is, how can I test my model against others? If the temperature
+   parameter is set to zero, then the run is fully deterministic, so in
+   principle, if I can set T=0 in llama.cpp and run it on a fixed prompt, then
+   I'll have a test case.
+
+   Given that test case I can iterate through all permutations of adjoints of
+   the attention matricies. But that assumes the rest of the system is operating
+   correctly. And that I understand how to interpret the output.
+
+   The upside of working in 3 languages (4 if you count torch) simultaneously is
+   that if you don't understand something, you can try a different
+   translation. This has definitely helped. The downside is that the python code
+   is easy to read, modify, and partially run, but cannot fully run (not enough
+   vram) whereas the C++ code can fully run, but is harder to modify and tedious
+   to run and inspect while running.
+
+   Ideally I want to get all of the intermediate states out of the python code
+   and test as I go, but my inputs come from the C code and I don't know if
+   they're quite the same (that's one of the tests). So I'm thusfar restricted
+   to wholistic voodoo.
+
+   At least I've reduced this to a debugging problem, and I'm pretty good at
+   that.
+
+   Update: running llama.cpp with =--temp 0.0= leads to the same output every
+   time, as hypothesised. Now I have some test cases. If only I count get the
+   token ID stream instead of text...
